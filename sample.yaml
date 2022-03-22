@@ -1,0 +1,15 @@
+resources:
+  - ../base
+
+images:
+  - name: "app1"
+    newTag: "1.0.0.1"
+  - name: "app2"
+    newTag: "1.2.3.4"
+
+patches:
+  - path: patch.yaml
+    target:
+      kind: Deployment
+      namespace: default
+      name: app1

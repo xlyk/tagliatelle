@@ -3,24 +3,23 @@ package tagliatelle
 import (
 	"bufio"
 	"fmt"
-	"github.com/ghodss/yaml"
 	memfs "github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/rotisserie/eris"
 	log "github.com/sirupsen/logrus"
+	"regexp"
 	"strings"
 	"tagliatelle/pkg/settings"
 )
 
 type Options struct {
-	GitRepo        string
-	HelmPath       string
-	KustomizeImage string
-	Tag            string
-	FilePath       string
-	Mode           string
+	DryRun   bool
+	GitRepo  string
+	Pattern  string
+	Tag      string
+	FilePath string
 }
 
 // create storage and filesystem
@@ -30,7 +29,6 @@ var (
 )
 
 func Entrypoint(o Options) error {
-
 	// setup GitHub auth
 	auth := &http.BasicAuth{
 		Username: settings.GitUser,
@@ -55,18 +53,14 @@ func Entrypoint(o Options) error {
 		return eris.Wrap(err, "failed to get repo worktree")
 	}
 
-	// update filePath with new tag
-	switch o.Mode {
-	case "helm":
-		if err := updateHelmValues(o.FilePath, o.Tag, o.HelmPath); err != nil {
-			return eris.Wrap(err, "failed to update helm values")
-		}
-	case "kustomize":
-		if err := updateKustomizationImage(o.FilePath, o.Tag, o.KustomizeImage); err != nil {
-			return eris.Wrap(err, "failed to update helm values")
-		}
-	default:
-		return eris.Wrap(err, "invalid mode")
+	// use regex replace to update filePath with new tag
+	err = regexReplace(o.FilePath, o.Pattern, o.Tag, o.DryRun)
+	if err != nil {
+		return eris.Wrap(err, "failed to run regex replace")
+	}
+
+	if o.DryRun {
+		return nil
 	}
 
 	// git add filePath
@@ -76,7 +70,7 @@ func Entrypoint(o Options) error {
 	}
 
 	// set commit message
-	msg := fmt.Sprintf("auto bump %s:%s", o.KustomizeImage, o.Tag)
+	msg := fmt.Sprintf("auto bump: %s", o.Tag)
 	_, err = w.Commit(msg, &git.CommitOptions{})
 	if err != nil {
 		return eris.Wrap(err, "failed to create commit")
@@ -95,85 +89,32 @@ func Entrypoint(o Options) error {
 	return nil
 }
 
-func updateHelmValues(filePath, tag, path string) error {
-	return eris.New("not implemented")
-}
-
-type KustomizeImage struct {
-	Name    string `json:"name,omitempty" yaml:"name,omitempty"`
-	NewName string `json:"newName,omitempty" yaml:"newName,omitempty"`
-	NewTag  string `json:"newTag,omitempty" yaml:"newTag,omitempty"`
-}
-
-func getKustomizeImage(img interface{}) (*KustomizeImage, error) {
-	yamlBytes, err := yaml.Marshal(&img)
-	if err != nil {
-		return nil, eris.Wrap(err, "failed to marshal yaml")
-	}
-
-	var image KustomizeImage
-	err = yaml.Unmarshal(yamlBytes, &image)
-	if err != nil {
-		return nil, eris.Wrap(err, "failed to unmarshal yaml")
-	}
-
-	return &image, nil
-}
-
-func updateKustomizationImage(filePath, tag, image string) error {
-	kustomizeMap, err := readFile(filePath)
+func regexReplace(filename, pattern, tag string, dryRun bool) error {
+	src, err := readFile(filename)
 	if err != nil {
 		return eris.Wrap(err, "failed to read file")
 	}
 
-	updated := false
+	m := regexp.MustCompile(pattern)
 
-	// iterate existing images and populate new slice
-	var kustomizeImages []KustomizeImage
-	for _, img := range kustomizeMap["images"].([]interface{}) {
-		// get KustomizeImage
-		kImage, err := getKustomizeImage(img)
-		if err != nil {
-			log.Error("failed to get kustomize image")
-			continue
-		}
+	t := fmt.Sprintf("${1}%s${3}", tag)
 
-		// compare image value here, update if matches
-		if kImage.Name == image {
-			kImage.NewTag = tag
-			updated = true
-		}
+	res := m.ReplaceAllString(*src, t)
 
-		// add image to slice
-		kustomizeImages = append(kustomizeImages, *kImage)
+	if dryRun {
+		fmt.Println(res)
+		return nil
 	}
 
-	// if no match then error
-	if !updated {
-		return eris.New("no match found, failed to update image")
-	}
-
-	// replace images in kustomizeMap w/ kustomizeImages
-	kustomizeMap["images"] = kustomizeImages
-
-	// marshal yaml
-	yamlBytes, err := yaml.Marshal(&kustomizeMap)
-	if err != nil {
-		return eris.Wrap(err, "failed to marshal yaml")
-	}
-
-	// write kustomizeMap to yaml file
-	err = writeBytesToFile(filePath, yamlBytes)
-	if err != nil {
-		return eris.Wrap(err, "failed to write bytes to file")
+	// write changes to file
+	if err := writeBytesToFile(filename, []byte(res)); err != nil {
+		return eris.Wrap(err, "failed to write result to file")
 	}
 
 	return nil
 }
 
-func readFile(filename string) (map[string]interface{}, error) {
-	var output map[string]interface{}
-
+func readFile(filename string) (*string, error) {
 	f, err := fs.Open(filename)
 	if err != nil {
 		return nil, eris.Wrap(err, "failed to read file")
@@ -192,12 +133,7 @@ func readFile(filename string) (map[string]interface{}, error) {
 
 	allLines := strings.Join(lines, "\n")
 
-	err = yaml.Unmarshal([]byte(allLines), &output)
-	if err != nil {
-		return nil, eris.Wrap(err, "failed to unmarshal yaml")
-	}
-
-	return output, nil
+	return &allLines, nil
 }
 
 func writeBytesToFile(outputFile string, data []byte) error {

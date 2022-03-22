@@ -3,87 +3,58 @@ package main
 import (
 	"flag"
 	log "github.com/sirupsen/logrus"
-	"os"
 	"tagliatelle/pkg/settings"
 	"tagliatelle/pkg/tagliatelle"
 )
 
+var (
+	dryRun   bool
+	filePath string
+	pattern  string
+	repo     string
+	tag      string
+)
+
 func main() {
 	if err := settings.Load(); err != nil {
-		log.WithError(err).Error("failed to load settings")
+		log.WithError(err).
+			Error("failed to load settings")
 	}
-
-	var (
-		filePath       string
-		helmPath       string
-		kustomizeImage string
-		mode           string
-		repo           string
-		tag            string
-	)
 
 	flag.StringVar(&repo, "repo", "", "name of git repository")
 	flag.StringVar(&filePath, "file", "", "file path to update")
 	flag.StringVar(&tag, "tag", "", "new tag to use for update")
-	flag.StringVar(&mode, "mode", "", "mode to use [helm|kustomize]")
-	flag.StringVar(&helmPath, "helm-path", "", "path to update in helm values file")
-	flag.StringVar(&kustomizeImage, "kustomize-image", "", "name of image in kustomization file")
+	flag.StringVar(&pattern, "pattern", "", "regex pattern to find and replace tag")
+	flag.BoolVar(&dryRun, "dry-run", false, "enable dry run")
 	flag.Parse()
 
-	if repo == "" {
-		log.Error("invalid repo")
-		os.Exit(1)
-		return
-	}
-
-	if filePath == "" {
-		log.Error("invalid file")
-		os.Exit(1)
-		return
-	}
-
-	if tag == "" {
-		log.Error("invalid tag")
-		os.Exit(1)
-		return
-	}
-
-	switch mode {
-	case "helm":
-		if helmPath == "" {
-			log.Error("invalid helm-path")
-			os.Exit(1)
-			return
-		}
-		break
-	case "kustomize":
-		if kustomizeImage == "" {
-			log.Error("invalid kustomize-image")
-			os.Exit(1)
-			return
-		}
-		break
-	default:
-		log.Error("invalid mode")
-		os.Exit(1)
-		return
+	switch {
+	case repo == "":
+		invalid("repo")
+	case filePath == "":
+		invalid("filePath")
+	case tag == "":
+		invalid("tag")
+	case pattern == "":
+		invalid("pattern")
 	}
 
 	opts := tagliatelle.Options{
-		GitRepo:        repo,
-		HelmPath:       helmPath,
-		KustomizeImage: kustomizeImage,
-		FilePath:       filePath,
-		Tag:            tag,
-		Mode:           mode,
+		DryRun:   dryRun,
+		GitRepo:  repo,
+		Pattern:  pattern,
+		FilePath: filePath,
+		Tag:      tag,
 	}
 
 	if err := tagliatelle.Entrypoint(opts); err != nil {
-		log.Error("tagliatelle failed to run")
-		os.Exit(1)
-		return
+		log.WithError(err).
+			Fatal("tagliatelle failed to run")
 	}
 
 	log.Info("finished")
-	os.Exit(0)
+}
+
+func invalid(str string) {
+	log.Fatal("invalid parameter: " + str)
 }
