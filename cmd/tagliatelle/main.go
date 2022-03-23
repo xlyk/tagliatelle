@@ -51,8 +51,6 @@ func main() {
 		log.WithError(err).
 			Fatal("tagliatelle failed to run")
 	}
-
-	log.Info("finished")
 }
 
 func invalid(str string) {

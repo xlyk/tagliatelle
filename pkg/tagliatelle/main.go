@@ -5,6 +5,7 @@ import (
 	"fmt"
 	memfs "github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 	"github.com/go-git/go-git/v5/plumbing/transport/http"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/rotisserie/eris"
@@ -12,6 +13,7 @@ import (
 	"regexp"
 	"strings"
 	"tagliatelle/pkg/settings"
+	"time"
 )
 
 type Options struct {
@@ -36,6 +38,9 @@ func Entrypoint(o Options) error {
 	}
 
 	// clone git repo
+	log.WithFields(log.Fields{
+		"repo": o.GitRepo,
+	}).Info("cloning git repo")
 	r, err := git.Clone(storage, fs, &git.CloneOptions{
 		URL:  o.GitRepo,
 		Auth: auth,
@@ -43,75 +48,129 @@ func Entrypoint(o Options) error {
 	if err != nil {
 		return eris.Wrap(err, "failed to clone repo")
 	}
-	log.WithFields(log.Fields{
-		"repo": o.GitRepo,
-	}).Info("repo cloned")
 
 	// create worktree
+	log.Info("creating worktree on filesystem")
 	w, err := r.Worktree()
 	if err != nil {
 		return eris.Wrap(err, "failed to get repo worktree")
 	}
 
+	// get file contents
+	log.WithFields(log.Fields{
+		"file": o.FilePath,
+	}).Info("reading file")
+	data, err := readFile(o.FilePath)
+	if err != nil {
+		return eris.Wrap(err, "failed to read file")
+	}
+
+	// check for existing tag
+	log.WithFields(log.Fields{
+		"tag": o.Tag,
+	}).Info("checking if tag already exists in file")
+	oldTag, exists := checkTagAlreadyExists(data, o.Pattern, o.Tag)
+	if exists {
+		log.WithFields(log.Fields{
+			"old": oldTag,
+			"new": o.Tag,
+		}).Warn("tag already exists in file... exiting early")
+		return nil
+	}
+
+	log.WithFields(log.Fields{
+		"old": oldTag,
+		"new": o.Tag,
+	}).Info("confirmed old tag != new tag")
+
 	// use regex replace to update filePath with new tag
-	err = regexReplace(o.FilePath, o.Pattern, o.Tag, o.DryRun)
+	log.WithFields(log.Fields{
+		"pattern": o.Pattern,
+	}).Info("replacing tag")
+	modifiedData, err := regexReplace(data, o.Pattern, o.Tag, o.DryRun)
 	if err != nil {
 		return eris.Wrap(err, "failed to run regex replace")
 	}
 
-	if o.DryRun {
-		return nil
+	// write changes to file
+	log.WithFields(log.Fields{
+		"file": o.FilePath,
+	}).Info("writing changes to file")
+	if err := writeBytesToFile(o.FilePath, []byte(*modifiedData)); err != nil {
+		return eris.Wrap(err, "failed to write file")
 	}
 
 	// git add filePath
+	log.Info("adding file to index")
 	_, err = w.Add(o.FilePath)
 	if err != nil {
-		return eris.Wrap(err, "failed to add file")
+		return eris.Wrap(err, "failed to add file to index")
 	}
 
 	// set commit message
 	msg := fmt.Sprintf("auto bump: %s", o.Tag)
-	_, err = w.Commit(msg, &git.CommitOptions{})
+	log.WithFields(log.Fields{
+		"msg": msg,
+	}).Info("setting commit message")
+	hash, err := w.Commit(msg, &git.CommitOptions{
+		Author: &object.Signature{
+			Name: "tagliatelle",
+			When: time.Now().UTC(),
+		},
+	})
 	if err != nil {
 		return eris.Wrap(err, "failed to create commit")
 	}
 
 	// push the code to the remote
+	log.WithFields(log.Fields{
+		"hash": hash.String(),
+	}).Info("pushing commit to remote")
+
+	if o.DryRun {
+		log.Info("dry-run successful - no changes made")
+		fmt.Println("")
+		fmt.Println(modifiedData)
+		return nil
+	}
+
 	err = r.Push(&git.PushOptions{
 		RemoteName: "origin",
 		Auth:       auth,
 	})
 	if err != nil {
-		return eris.Wrap(err, "failed to push commit to origin")
+		return eris.Wrap(err, "failed to push commit to remote")
 	}
+	log.Info("remote repo successfully updated")
 
-	log.Info("remote repo updated")
 	return nil
 }
 
-func regexReplace(filename, pattern, tag string, dryRun bool) error {
-	src, err := readFile(filename)
-	if err != nil {
-		return eris.Wrap(err, "failed to read file")
+func checkTagAlreadyExists(data *string, pattern, tag string) (string, bool) {
+	var oldTag string
+
+	m := regexp.MustCompile(pattern)
+
+	res := m.FindAllStringSubmatch(*data, -1)
+
+	if len(res) > 0 && len(res[0]) >= 2 {
+		oldTag = res[0][2]
+		if oldTag == tag {
+			return oldTag, true
+		}
 	}
 
+	return oldTag, false
+}
+
+func regexReplace(data *string, pattern, tag string, dryRun bool) (*string, error) {
 	m := regexp.MustCompile(pattern)
 
 	t := fmt.Sprintf("${1}%s${3}", tag)
 
-	res := m.ReplaceAllString(*src, t)
+	res := m.ReplaceAllString(*data, t)
 
-	if dryRun {
-		fmt.Println(res)
-		return nil
-	}
-
-	// write changes to file
-	if err := writeBytesToFile(filename, []byte(res)); err != nil {
-		return eris.Wrap(err, "failed to write result to file")
-	}
-
-	return nil
+	return &res, nil
 }
 
 func readFile(filename string) (*string, error) {
