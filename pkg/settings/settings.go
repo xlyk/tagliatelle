@@ -1,10 +1,11 @@
 package settings
 
 import (
+	"os"
+
 	"github.com/compose-spec/godotenv"
 	"github.com/rotisserie/eris"
 	log "github.com/sirupsen/logrus"
-	"os"
 )
 
 var (
@@ -38,6 +39,8 @@ func loadString(key string, ptr *string) error {
 	if !ok {
 		return eris.Errorf("failed to load string %s from environment variable", key)
 	}
+
 	*ptr = str
+
 	return nil
 }

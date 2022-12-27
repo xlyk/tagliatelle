@@ -1,0 +1,78 @@
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  goconst:
+    min-len: 2
+    min-occurrences: 3
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - experimental
+      - opinionated
+      - performance
+      - style
+  govet:
+    check-shadowing: false
+  nolintlint:
+    require-explanation: true
+    require-specific: true
+  wrapcheck:
+    # An array of strings that specify substrings of signatures to ignore.
+    # If this set, it will override the default set of ignored signatures.
+    # See https://github.com/tomarrell/wrapcheck#configuration for more information.
+    # Default: [".Errorf(", "errors.New(", "errors.Unwrap(", ".Wrap(", ".Wrapf(", ".WithMessage(", ".WithMessagef(", ".WithStack("]
+    ignoreSigs:
+      - .Errorf(
+      - errors.New(
+      - errors.Unwrap(
+      - .Wrap(
+      - .Wrapf(
+      - .WithMessage(
+      - .WithMessagef(
+      - .WithStack(
+      - eris.New
+    ignorePackageGlobs:
+      - data/tests
+
+linters:
+  disable-all: true
+  enable:
+    - bodyclose
+    - dupl
+    - errcheck
+    - funlen
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godox
+    - gofumpt
+    - goimports
+    - gomnd
+    - gosec
+    - gosimple
+    - govet
+    - ifshort
+    - ineffassign
+    - lll
+    - maintidx
+    - misspell
+    - nakedret
+    - nestif
+    - nilerr
+    - nolintlint
+    - prealloc
+    - predeclared
+    - revive
+    - rowserrcheck
+    - sqlclosecheck
+    - unparam
+    - unused
+    - wastedassign
+    - whitespace
+    - wrapcheck
+    - wsl
+
+run:
+  issues-exit-code: 1

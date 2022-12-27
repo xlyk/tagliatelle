@@ -3,6 +3,11 @@ package tagliatelle
 import (
 	"bufio"
 	"fmt"
+	"regexp"
+	"strings"
+	"tagliatelle/pkg/settings"
+	"time"
+
 	memfs "github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
@@ -10,10 +15,6 @@ import (
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/rotisserie/eris"
 	log "github.com/sirupsen/logrus"
-	"regexp"
-	"strings"
-	"tagliatelle/pkg/settings"
-	"time"
 )
 
 type Options struct {
@@ -30,6 +31,7 @@ var (
 	fs      = memfs.New()
 )
 
+//nolint:funlen // this function is expected to be long
 func Entrypoint(o Options) error {
 	// setup GitHub auth
 	auth := &http.BasicAuth{
@@ -41,6 +43,7 @@ func Entrypoint(o Options) error {
 	log.WithFields(log.Fields{
 		"repo": o.GitRepo,
 	}).Info("cloning git repo")
+
 	r, err := git.Clone(storage, fs, &git.CloneOptions{
 		URL:  o.GitRepo,
 		Auth: auth,
@@ -51,6 +54,7 @@ func Entrypoint(o Options) error {
 
 	// create worktree
 	log.Info("creating worktree on filesystem")
+
 	w, err := r.Worktree()
 	if err != nil {
 		return eris.Wrap(err, "failed to get repo worktree")
@@ -60,6 +64,7 @@ func Entrypoint(o Options) error {
 	log.WithFields(log.Fields{
 		"file": o.FilePath,
 	}).Info("reading file")
+
 	data, err := readFile(o.FilePath)
 	if err != nil {
 		return eris.Wrap(err, "failed to read file")
@@ -69,12 +74,14 @@ func Entrypoint(o Options) error {
 	log.WithFields(log.Fields{
 		"tag": o.Tag,
 	}).Info("checking if tag already exists in file")
+
 	oldTag, exists := checkTagAlreadyExists(data, o.Pattern, o.Tag)
 	if exists {
 		log.WithFields(log.Fields{
 			"old": oldTag,
 			"new": o.Tag,
 		}).Warn("tag already exists in file... exiting early")
+
 		return nil
 	}
 
@@ -87,21 +94,21 @@ func Entrypoint(o Options) error {
 	log.WithFields(log.Fields{
 		"pattern": o.Pattern,
 	}).Info("replacing tag")
-	modifiedData, err := regexReplace(data, o.Pattern, o.Tag, o.DryRun)
-	if err != nil {
-		return eris.Wrap(err, "failed to run regex replace")
-	}
+
+	modifiedData := regexReplace(data, o.Pattern, o.Tag)
 
 	// write changes to file
 	log.WithFields(log.Fields{
 		"file": o.FilePath,
 	}).Info("writing changes to file")
+
 	if err := writeBytesToFile(o.FilePath, []byte(*modifiedData)); err != nil {
 		return eris.Wrap(err, "failed to write file")
 	}
 
 	// git add filePath
 	log.Info("adding file to index")
+
 	_, err = w.Add(o.FilePath)
 	if err != nil {
 		return eris.Wrap(err, "failed to add file to index")
@@ -109,9 +116,11 @@ func Entrypoint(o Options) error {
 
 	// set commit message
 	msg := fmt.Sprintf("auto bump: %s", o.Tag)
+
 	log.WithFields(log.Fields{
 		"msg": msg,
 	}).Info("setting commit message")
+
 	hash, err := w.Commit(msg, &git.CommitOptions{
 		Author: &object.Signature{
 			Name: "tagliatelle",
@@ -131,6 +140,7 @@ func Entrypoint(o Options) error {
 		log.Info("dry-run successful - no changes made")
 		fmt.Println("")
 		fmt.Println(modifiedData)
+
 		return nil
 	}
 
@@ -141,6 +151,7 @@ func Entrypoint(o Options) error {
 	if err != nil {
 		return eris.Wrap(err, "failed to push commit to remote")
 	}
+
 	log.Info("remote repo successfully updated")
 
 	return nil
@@ -163,14 +174,14 @@ func checkTagAlreadyExists(data *string, pattern, tag string) (string, bool) {
 	return oldTag, false
 }
 
-func regexReplace(data *string, pattern, tag string, dryRun bool) (*string, error) {
+func regexReplace(data *string, pattern, tag string) *string {
 	m := regexp.MustCompile(pattern)
 
 	t := fmt.Sprintf("${1}%s${3}", tag)
 
 	res := m.ReplaceAllString(*data, t)
 
-	return &res, nil
+	return &res
 }
 
 func readFile(filename string) (*string, error) {
@@ -186,6 +197,7 @@ func readFile(filename string) (*string, error) {
 	for scanner.Scan() {
 		lines = append(lines, scanner.Text())
 	}
+
 	if err := scanner.Err(); err != nil {
 		return nil, eris.Wrap(err, "failed to read file with scanner")
 	}

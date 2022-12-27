@@ -4,7 +4,6 @@ go 1.18
 
 require (
 	github.com/compose-spec/godotenv v1.3.0
-	github.com/ghodss/yaml v1.0.0
 	github.com/go-git/go-billy/v5 v5.3.1
 	github.com/go-git/go-git/v5 v5.4.2
 	github.com/rotisserie/eris v0.5.2
@@ -28,5 +27,4 @@ require (
 	golang.org/x/net v0.0.0-20210326060303-6b1517762897 // indirect
 	golang.org/x/sys v0.0.0-20210502180810-71e4cd670f79 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v2 v2.3.0 // indirect
 )

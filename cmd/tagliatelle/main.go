@@ -2,9 +2,10 @@ package main
 
 import (
 	"flag"
-	log "github.com/sirupsen/logrus"
 	"tagliatelle/pkg/settings"
 	"tagliatelle/pkg/tagliatelle"
+
+	log "github.com/sirupsen/logrus"
 )
 
 var (
