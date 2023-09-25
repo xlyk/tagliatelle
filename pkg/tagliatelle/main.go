@@ -3,12 +3,15 @@ package tagliatelle
 import (
 	"bufio"
 	"fmt"
+	"regexp"
+	"strings"
+
+	"github.com/pkg/errors"
+
 	"github.com/go-git/go-billy/v5/memfs"
 	"github.com/go-git/go-git/v5/storage/memory"
 	"github.com/rotisserie/eris"
 	log "github.com/sirupsen/logrus"
-	"regexp"
-	"strings"
 )
 
 type Options struct {
@@ -28,32 +31,35 @@ var (
 func Entrypoint(o Options) error {
 	repo, err := NewRepo(o)
 	if err != nil {
-		return eris.Wrap(err, "failed to create Repo struct")
+		return errors.Wrap(err, "failed to create Repo struct")
 	}
 
 	if err := repo.CheckoutMainBranch(); err != nil {
-		return eris.Wrap(err, "failed to clone repository")
+		return errors.Wrap(err, "failed to clone repository")
 	}
 
 	data, err := readFile(o.FilePath)
 	if err != nil {
-		return eris.Wrap(err, "failed to read file")
+		return errors.Wrap(err, "failed to read file")
 	}
 
-	if checkTagAlreadyExists(data, o.Pattern, o.Tag) {
+	exists, err := checkTagAlreadyExists(data, o.Pattern, o.Tag)
+	if err != nil {
+		return errors.Wrap(err, "failed to check if tag already exists")
+	}
+
+	if exists {
 		return nil
 	}
 
 	if err = repo.updateFile(data); err != nil {
-		return eris.Wrap(err, "failed to update file")
+		return errors.Wrap(err, "failed to update file")
 	}
 
 	return nil
 }
 
-func checkTagAlreadyExists(data *string, pattern, tag string) bool {
-	// check for existing tag
-
+func checkTagAlreadyExists(data *string, pattern, tag string) (bool, error) {
 	log.WithFields(log.Fields{
 		"tag": tag,
 	}).Info("checking if tag already exists in file")
@@ -72,8 +78,12 @@ func checkTagAlreadyExists(data *string, pattern, tag string) bool {
 				"new": tag,
 			}).Warn("tag already exists in file... exiting early")
 
-			return true
+			return true, nil
 		}
+	}
+
+	if oldTag == "" {
+		return false, eris.New("failed to find old tag")
 	}
 
 	log.WithFields(log.Fields{
@@ -81,7 +91,7 @@ func checkTagAlreadyExists(data *string, pattern, tag string) bool {
 		"new": tag,
 	}).Info("confirmed old tag != new tag")
 
-	return false
+	return false, nil
 }
 
 func regexReplace(data *string, pattern, tag string) *string {
@@ -102,7 +112,7 @@ func readFile(filename string) (*string, error) {
 
 	f, err := fs.Open(filename)
 	if err != nil {
-		return nil, eris.Wrap(err, "failed to read file")
+		return nil, errors.Wrap(err, "failed to read file")
 	}
 
 	var lines []string
@@ -114,7 +124,7 @@ func readFile(filename string) (*string, error) {
 	}
 
 	if err := scanner.Err(); err != nil {
-		return nil, eris.Wrap(err, "failed to read file with scanner")
+		return nil, errors.Wrap(err, "failed to read file with scanner")
 	}
 
 	allLines := strings.Join(lines, "\n")
@@ -125,12 +135,12 @@ func readFile(filename string) (*string, error) {
 func writeBytesToFile(outputFile string, data []byte) error {
 	f, err := fs.Create(outputFile)
 	if err != nil {
-		return eris.Wrap(err, "failed to open file to write data to")
+		return errors.Wrap(err, "failed to open file to write data to")
 	}
 
 	_, err = f.Write(data)
 	if err != nil {
-		return eris.Wrap(err, "failed to write data to file")
+		return errors.Wrap(err, "failed to write data to file")
 	}
 
 	defer func() {
